@@ -28,12 +28,23 @@ void horizontalShimmy();
 
 int main()
 {
+    int ex, ey;
+
     cs = newCState();
-    readAll(0, (char *) &cs->sm, sizeof(ServerMessage));
-    cstateFirstSM(cs, 320, 320);
+    cstateFirstSM(cs, WW, WH);
 
     /* now just wander a lot! */
     exploreWorld();
+
+    /* get away from our flag geysers */
+    findAndGoto(cs, 0, 2, ACT_ADVANCE);
+
+    /* then find an electron */
+    cstateFindNearest(cs, &ex, &ey, CELL_ELECTRON);
+    if (ex >= 0) {
+        /* go there */
+        findAndGoto(cs, ex, ey, ACT_BUILD);
+    };
 
     /* and then spin like a loony */
     while (1)
@@ -42,10 +53,12 @@ int main()
 
 void exploreWorld()
 {
-    do {
+    if (WW != -1) verticalLoop();
+    horizontalShimmy();
+    while (cs->x != 0) {
         verticalLoop();
         horizontalShimmy();
-    } while (cs->x != 0);
+    }
 }
 
 void verticalLoop()

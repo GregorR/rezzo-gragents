@@ -66,7 +66,7 @@ CState *newCState()
     SF(ret, malloc, NULL, (sizeof(CState)));
 
     ret->w = ret->h = -1;
-    ret->x = ret->y = 0;
+    ret->x = ret->y = ret->card = 0;
 
     ret->id = -1; /* unknown */
     for (i = 0; i < MAX_AGENTS; i++) {
@@ -82,17 +82,145 @@ CState *newCState()
 /* intialize a CState with its first server message */
 void cstateFirstSM(CState *cs, int w, int h)
 {
-    SF(cs->c, malloc, NULL, (w*h));
-    memset(cs->c, CELL_UNKNOWN, w*h);
-    cs->w = w;
-    cs->h = h;
+    readAll(0, (char *) &cs->sm, sizeof(ServerMessage));
 
     /* set our CM to nop (just in case) */
     cs->cm.ts = cs->sm.ts - 1;
     cs->cm.act = ACT_NOP;
 
-    /* now just integrate the data */
-    cstateUpdate(cs);
+    if (w == -1) {
+        struct Buffer_ClientMessage bcm;
+        struct Buffer_ServerMessage bsm;
+        int tmpi, i;
+        unsigned char cl, cr, dcl, dcr;
+
+        INIT_BUFFER(bcm);
+        INIT_BUFFER(bsm);
+        WRITE_ONE_BUFFER(bcm, cs->cm);
+        WRITE_ONE_BUFFER(bsm, cs->sm);
+
+        /* first determine the world height */
+        while (1) {
+            /* move forward */
+            cs->cm.ts = cs->sm.ts;
+            if (cs->sm.c[(VIEWPORT-2)*VIEWPORT + (VIEWPORT/2)] == CELL_NONE) {
+                cs->cm.act = ACT_ADVANCE;
+            } else {
+                cs->cm.act = ACT_HIT;
+            }
+
+            SF(tmpi, writeAll, -1, (1, (char *) &cs->cm, sizeof(ClientMessage)));
+            SF(tmpi, readAll, -1, (0, (char *) &cs->sm, sizeof(ServerMessage)));
+
+            /* put them in the buffer */
+            WRITE_ONE_BUFFER(bcm, cs->cm);
+            WRITE_ONE_BUFFER(bsm, cs->sm);
+
+            /* then handle the message */
+            if (cs->sm.ts == ((cs->cm.ts + 1) & 0xFF) &&
+                cs->cm.act == ACT_ADVANCE &&
+                cs->sm.ack == ACK_OK) {
+                cs->y--;
+            }
+
+            /* should we stop? */
+            cl = cs->sm.c[(VIEWPORT-2)*VIEWPORT + (VIEWPORT/2) - 1];
+            cr = cs->sm.c[(VIEWPORT-2)*VIEWPORT + (VIEWPORT/2) + 1];
+            if (cl >= CELL_BASE && cl <= CELL_BASE_LAST &&
+                cr >= CELL_BASE && cr <= CELL_BASE_LAST) {
+                /* we're done! */
+                cs->h = -cs->y;
+                cs->y = 0;
+                break;
+            }
+        }
+
+        /* turn right */
+        while (1) {
+            /* move forward */
+            cs->cm.ts = cs->sm.ts;
+            cs->cm.act = ACT_TURN_RIGHT;
+
+            SF(tmpi, writeAll, -1, (1, (char *) &cs->cm, sizeof(ClientMessage)));
+            SF(tmpi, readAll, -1, (0, (char *) &cs->sm, sizeof(ServerMessage)));
+
+            /* put them in the buffer */
+            WRITE_ONE_BUFFER(bcm, cs->cm);
+            WRITE_ONE_BUFFER(bsm, cs->sm);
+
+            /* then handle the message */
+            if (cs->sm.ts == ((cs->cm.ts + 1) & 0xFF) && cs->sm.ack == ACK_OK) {
+                cs->card++;
+                break;
+            }
+        }
+
+        /* then determine the world width */
+        while (1) {
+            /* move forward */
+            cs->cm.ts = cs->sm.ts;
+            if (cs->sm.c[(VIEWPORT-2)*VIEWPORT + (VIEWPORT/2)] == CELL_NONE) {
+                cs->cm.act = ACT_ADVANCE;
+            } else {
+                cs->cm.act = ACT_HIT;
+            }
+
+            SF(tmpi, writeAll, -1, (1, (char *) &cs->cm, sizeof(ClientMessage)));
+            SF(tmpi, readAll, -1, (0, (char *) &cs->sm, sizeof(ServerMessage)));
+
+            /* put them in the buffer */
+            WRITE_ONE_BUFFER(bcm, cs->cm);
+            WRITE_ONE_BUFFER(bsm, cs->sm);
+
+            /* then handle the message */
+            if (cs->sm.ts == ((cs->cm.ts + 1) & 0xFF) &&
+                cs->cm.act == ACT_ADVANCE &&
+                cs->sm.ack == ACK_OK) {
+                cs->x++;
+            }
+
+            /* should we stop? */
+            cl = cs->sm.c[(VIEWPORT-2)*VIEWPORT + (VIEWPORT/2) - 1];
+            cr = cs->sm.c[(VIEWPORT-2)*VIEWPORT + (VIEWPORT/2) + 1];
+            dcl = cs->sm.c[(VIEWPORT-4)*VIEWPORT + (VIEWPORT/2) - 1];
+            dcr = cs->sm.c[(VIEWPORT-4)*VIEWPORT + (VIEWPORT/2) + 1];
+            if (cl >= CELL_BASE && cl <= CELL_BASE_LAST &&
+                cr >= CELL_FLAG_GEYSER && cr <= CELL_FLAG_GEYSER_LAST &&
+                !(dcl >= CELL_BASE && dcl <= CELL_BASE_LAST) &&
+                !(dcr >= CELL_FLAG_GEYSER && dcl <= CELL_FLAG_GEYSER_LAST)) {
+                /* we're done! */
+                cs->w = cs->x;
+                cs->x = 0;
+                cs->card = NORTH;
+                break;
+            }
+        }
+
+        /* make room */
+        w = cs->w;
+        h = cs->h;
+        SF(cs->c, malloc, NULL, (w*h));
+        memset(cs->c, CELL_UNKNOWN, w*h);
+
+        /* and handle all these messages */
+        for (i = 0; i < bcm.bufused; i++) {
+            cs->cm = bcm.buf[i];
+            cs->sm = bsm.buf[i];
+            cstateUpdate(cs);
+        }
+
+        FREE_BUFFER(bcm);
+        FREE_BUFFER(bsm);
+
+    } else {
+        SF(cs->c, malloc, NULL, (w*h));
+        memset(cs->c, CELL_UNKNOWN, w*h);
+        cs->w = w;
+        cs->h = h;
+
+        /* now just integrate the data */
+        cstateUpdate(cs);
+    }
 }
 
 /* update a CState with a just-received server message */
@@ -137,12 +265,7 @@ void cstateUpdate(CState *cs)
         }
 
         /* make sure x and y are consistent */
-        if (cs->w > 0 && cs->h > 0) {
-            if (cs->x < 0) cs->x += cs->w;
-            if (cs->x >= cs->w) cs->x -= cs->w;
-            if (cs->y < 0) cs->y += cs->h;
-            if (cs->y >= cs->h) cs->y -= cs->h;
-        }
+        cstateGetCellXY(cs, cs->x, cs->y, &cs->x, &cs->y);
 
     } else {
         fprintf(stderr, "Error %d for action %c\n", (int) cs->sm.ack, cs->cm.act);
@@ -194,14 +317,48 @@ int cstateDoAndWait(CState *cs, unsigned char act)
     return (cs->sm.ack == ACK_OK);
 }
 
-/* get a cell id at a specified location, which may be out of bounds */
-int cstateGetCell(CState *cs, int x, int y)
+/* get a cell id at a specified location, and store the real x and y */
+int cstateGetCellXY(CState *cs, int x, int y, int *sx, int *sy)
 {
     while (x < 0) x += cs->w;
     while (x >= cs->w) x -= cs->w;
     while (y < 0) y += cs->h;
     while (y >= cs->h) y -= cs->h;
+    if (sx) {
+        *sx = x;
+        *sy = y;
+    }
     return y*cs->w+x;
+}
+
+/* get a cell id at a specified location, which may be out of bounds */
+int cstateGetCell(CState *cs, int x, int y)
+{
+    return cstateGetCellXY(cs, x, y, NULL, NULL);
+}
+
+/* find the nearest cell with the given value */
+int cstateFindNearest(CState *cs, int *sx, int *sy, unsigned char type)
+{
+    int r, x, y, rx, ry, i;
+
+    for (r = 1; r < cs->w || r < cs->h; r++) {
+        for (y = -r; y < r; y++) {
+            for (x = -r; x < r; x++) {
+                i = cstateGetCellXY(cs, cs->x+x, cs->y+y, &rx, &ry);
+                if (cs->c[i] == type) {
+                    /* gotcha! */
+                    *sx = rx;
+                    *sy = ry;
+                    return i;
+                }
+            }
+        }
+    }
+
+    *sx = -1;
+    *sy = -1;
+    return -1;
 }
 
 /* match our cardinality to the given one */
@@ -408,11 +565,7 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact)
             /* take a step */
             sx = cur->x - ch.xd;
             sy = cur->y - ch.yd;
-            if (sx < 0) sx += cs->w;
-            if (sx >= cs->w) sx -= cs->w;
-            if (sy < 0) sy += cs->h;
-            if (sy >= cs->h) sy -= cs->h;
-            si = sy*cs->w + sx;
+            si = cstateGetCellXY(cs, sx, sy, &sx, &sy);
             if (searched[si]) continue;
             c = cs->c[si];
             act = dact;

@@ -19,6 +19,7 @@
 
 /* this must be checked out as a subdir of rezzo */
 #include "../agent.h"
+#include "../buffer.h"
 
 /* extra cell values */
 #define CELL_UNKNOWN '\xFF'
@@ -26,6 +27,9 @@
 #define CELL_FLAG_LAST 'J'
 #define CELL_FLAG_GEYSER_LAST 'j'
 #define CELL_BASE_LAST 'u'
+
+BUFFER(ClientMessage, ClientMessage);
+BUFFER(ServerMessage, ServerMessage);
 
 /* agent info */
 typedef struct _CAgent CAgent;
@@ -66,7 +70,8 @@ ssize_t writeAll(int fd, const char *buf, size_t count);
 /* create a CState */
 CState *newCState();
 
-/* intialize a CState with its first server message */
+/* intialize a CState with its first server message. Determines the world size
+ * if w==h==-1 */
 void cstateFirstSM(CState *cs, int w, int h);
 
 /* update a CState with a just-received server message */
@@ -76,8 +81,14 @@ void cstateUpdate(CState *cs);
  * was successful */
 int cstateDoAndWait(CState *cs, unsigned char act);
 
+/* get a cell id at a specified location, and store the real x and y */
+int cstateGetCellXY(CState *cs, int x, int y, int *sx, int *sy);
+
 /* get a cell id at a specified location, which may be out of bounds */
 int cstateGetCell(CState *cs, int x, int y);
+
+/* find the nearest cell with the given value */
+int cstateFindNearest(CState *cs, int *x, int *y, unsigned char type);
 
 /* match our cardinality to the given one */
 void matchCardinality(CState *cs, int card);
