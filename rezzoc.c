@@ -154,6 +154,8 @@ void cstateUpdate(CState *cs)
 
     }
 
+    ch = cardinalityHelpers[cs->card];
+
     /* then update our state */
     for (y = 0, yoff = 0; y < VIEWPORT; y++, yoff += VIEWPORT) {
         for (x = 0, si = yoff; x < VIEWPORT; x++, si++) {
