@@ -628,14 +628,16 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact)
 int followPath(CState *cs, CPath *path)
 {
     int succ = 1;
-    unsigned char dact = ACT_ADVANCE;
+    unsigned char dact = ACT_ADVANCE, nact = 0;
     CPath *last;
     while (path) {
         int i = path->y*cs->w + path->x;
 
         /* make our cardinality match */
-        if (cs->card != path->card)
+        if (cs->card != path->card) {
             matchCardinality(cs, path->card);
+            nact = ACT_ADVANCE; /* don't build hard corners */
+        }
 
         /* check if our expectations are met */
         if (path->act == ACT_ADVANCE || path->act == ACT_BUILD) {
@@ -662,12 +664,14 @@ int followPath(CState *cs, CPath *path)
         }
 
         /* then go */
-        while (!cstateDoAndWait(cs, dact)) {
+        while (!cstateDoAndWait(cs, nact ? nact : dact)) {
             if (cs->sm.ack != ACK_NO_MESSAGE) {
                 succ = 0;
                 goto fail;
             }
         }
+        nact = 0;
+        if (path->act == ACT_HIT) nact = ACT_BUILD;
 
         /* make sure all went well */
         if (cs->x != path->x || cs->y != path->y) {
