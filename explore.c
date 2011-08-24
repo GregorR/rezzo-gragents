@@ -37,13 +37,13 @@ int main()
     exploreWorld();
 
     /* get away from our flag geysers */
-    findAndGoto(cs, 0, 2, ACT_ADVANCE);
+    findAndGoto(cs, 0, 2, ACT_ADVANCE, 0);
 
     /* then find an electron */
     cstateFindNearest(cs, &ex, &ey, CELL_ELECTRON);
     if (ex >= 0) {
         /* go there */
-        findAndGoto(cs, ex, ey, ACT_BUILD);
+        findAndGoto(cs, ex, ey, ACT_BUILD, 1);
     };
 
     /* and then spin like a loony */
@@ -63,14 +63,14 @@ void exploreWorld()
 
 void verticalLoop()
 {
-    findAndGoto(cs, cs->x, cs->h * 2 / 3, ACT_ADVANCE);
-    findAndGoto(cs, cs->x, cs->h / 3, ACT_ADVANCE);
-    findAndGoto(cs, cs->x, 0, ACT_ADVANCE);
+    findAndGoto(cs, cs->x, cs->h * 2 / 3, ACT_ADVANCE, 0);
+    findAndGoto(cs, cs->x, cs->h / 3, ACT_ADVANCE, 0);
+    findAndGoto(cs, cs->x, 0, ACT_ADVANCE, 0);
 }
 
 void horizontalShimmy()
 {
     int x = cs->x + VIEWPORT;
     if (x >= cs->w) x = 0;
-    findAndGoto(cs, x, 0, ACT_ADVANCE);
+    findAndGoto(cs, x, 0, ACT_ADVANCE, 0);
 }

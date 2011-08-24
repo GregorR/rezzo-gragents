@@ -269,6 +269,7 @@ void cstateUpdate(CState *cs)
 
     } else {
         fprintf(stderr, "Error %d for action %c\n", (int) cs->sm.ack, cs->cm.act);
+        if (cs->sm.ack != ACK_NO_MESSAGE) abort();
 
     }
 
@@ -523,14 +524,14 @@ static void removeFromList(CPath **headp, CPath **tailp, CPath *torem)
 }
 
 /* find a path from the current location to the given location */
-CPath *findPath(CState *cs, int tx, int ty, unsigned char dact)
+CPath *findPath(CState *cs, int tx, int ty, unsigned char dact, unsigned char wire)
 {
     CPath *cur, *next, *good;
     CPath *toSearchHead, *toSearchTail;
     CPath *searchedHead, *searchedTail;
     unsigned char *searched;
     int scard, sx, sy, si, scost;
-    unsigned char c, act;
+    unsigned char c, act, hit, hitl, hitr;
 
     /* our initial searchlist is just the starting position */
     cur = toSearchHead = toSearchTail = newPath(cs->x, cs->y, cs->card);
@@ -569,6 +570,8 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact)
             if (searched[si]) continue;
             c = cs->c[si];
             act = dact;
+            hit = 0;
+            hitl = hitr = 0;
 
             /* ignore impenatrable things */
             if ((c >= CELL_AGENT && c <= CELL_AGENT_LAST) ||
@@ -581,13 +584,34 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact)
             if (scard != cur->card) scost++; /* to turn */
             if (c != CELL_NONE && c != (unsigned char) CELL_UNKNOWN) {
                 /* to hit */
-                act = ACT_HIT;
+                hit = 1;
                 scost += 4;
             }
+
+            /* more complicated for building wires */
+            if (wire) {
+                int nx, ny, ni;
+
+                /* left */
+                nx = cur->x - ch.xr;
+                ny = cur->y - ch.yr;
+                ni = cstateGetCell(cs, nx, ny);
+                if (cs->c[ni] != CELL_NONE) hitl = 1;
+
+                /* right */
+                nx = cur->x + ch.xr;
+                ny = cur->y + ch.yr;
+                ni = cstateGetCell(cs, nx, ny);
+                if (cs->c[ni] != CELL_NONE) hitr = 1;
+            }
+            scost += hitl * 6 + hitr * 6;
 
             /* now make the object for it */
             next = newPath(sx, sy, scard);
             next->act = act;
+            next->hit = hit;
+            next->hitl = hitl;
+            next->hitr = hitr;
             next->prev = cur;
             next->gScore = cur->gScore + scost;
             next->fScore = next->gScore + estCost(cs, sx, sy, tx, ty);
@@ -624,14 +648,29 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact)
     return good;
 }
 
+static int hitItTilItDies(CState *cs, int i)
+{
+    while (cs->c[i] != CELL_NONE) {
+        if (!cstateDoAndWait(cs, ACT_HIT)) {
+            if (cs->sm.ack != ACK_NO_MESSAGE) {
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
 /* follow this path (and free it). Returns 1 if it was successful, 0 otherwise */
 int followPath(CState *cs, CPath *path)
 {
     int succ = 1;
-    unsigned char dact = ACT_ADVANCE, nact = 0;
+    unsigned char nact = 0;
     CPath *last;
     while (path) {
         int i = path->y*cs->w + path->x;
+        int ni, tcard;
+        CardinalityHelper ch = cardinalityHelpers[path->card];
 
         /* make our cardinality match */
         if (cs->card != path->card) {
@@ -640,38 +679,52 @@ int followPath(CState *cs, CPath *path)
         }
 
         /* check if our expectations are met */
-        if (path->act == ACT_ADVANCE || path->act == ACT_BUILD) {
+        if (!path->hit) {
             /* shouldn't have an obstacle */
             if (cs->c[i] != CELL_NONE) {
                 /* oh dear! */
                 succ = 0;
                 goto fail;
             }
-
-            dact = path->act;
         }
 
         /* hit if we need to */
-        if (path->act == ACT_HIT) {
-            while (cs->c[i] != CELL_NONE) {
-                if (!cstateDoAndWait(cs, ACT_HIT)) {
-                    if (cs->sm.ack != ACK_NO_MESSAGE) {
-                        succ = 0;
-                        goto fail;
-                    }
-                }
+        if (!hitItTilItDies(cs, i)) {
+            succ = 0;
+            goto fail;
+        }
+
+        /* hit left/right if we need to */
+        if (path->hitl) {
+            ni = cstateGetCell(cs, cs->x - ch.xr, cs->y - ch.yr);
+            if (cs->c[ni] != CELL_NONE) {
+                tcard = path->card - 1;
+                if (tcard < 0) tcard += CARDINALITIES;
+                matchCardinality(cs, tcard);
+                if (!hitItTilItDies(cs, ni)) { succ = 0; goto fail; }
             }
+            matchCardinality(cs, path->card);
+        }
+        if (path->hitr) {
+            ni = cstateGetCell(cs, cs->x + ch.xr, cs->y + ch.yr);
+            if (cs->c[ni] != CELL_NONE) {
+                tcard = path->card + 1;
+                if (tcard >= CARDINALITIES) tcard -= CARDINALITIES;
+                matchCardinality(cs, tcard);
+                if (!hitItTilItDies(cs, ni)) { succ = 0; goto fail; }
+            }
+            matchCardinality(cs, path->card);
         }
 
         /* then go */
-        while (!cstateDoAndWait(cs, nact ? nact : dact)) {
+        while (!cstateDoAndWait(cs, nact ? nact : path->act)) {
             if (cs->sm.ack != ACK_NO_MESSAGE) {
                 succ = 0;
                 goto fail;
             }
         }
         nact = 0;
-        if (path->act == ACT_HIT) nact = ACT_BUILD;
+        if (path->hit) nact = ACT_BUILD;
 
         /* make sure all went well */
         if (cs->x != path->x || cs->y != path->y) {
@@ -707,10 +760,10 @@ static void printPath(CPath *path)
 */
 
 /* JUST GET THERE! */
-int findAndGoto(CState *cs, int tx, int ty, unsigned char act)
+int findAndGoto(CState *cs, int tx, int ty, unsigned char act, unsigned char wire)
 {
     while (cs->x != tx || cs->y != ty) {
-        CPath *path = findPath(cs, tx, ty, act);
+        CPath *path = findPath(cs, tx, ty, act, wire);
         if (path == NULL) return 0;
         /*printPath(path);
         fprintf(stderr, "\n");*/
