@@ -56,7 +56,9 @@ struct _CPath {
     CPath *prev, *next; /* previous, next step if following this path */
     CPath *lprev, *lnext; /* previous, next where this is stored on a list */
     int gScore, fScore; /* cost to get here, estimate cost of getting here + getting to goal */
-    unsigned char act; /* expected action (hit or just advance?) */
+    unsigned char act; /* expected action (advance or build?) */
+    unsigned char hit; /* do we need to hit first? */
+    unsigned char hitl, hitr; /* need to hit at least one neighbor first */
     int x, y, card; /* expected state after this step */
 };
 
@@ -102,12 +104,12 @@ void freePathList(CPath *head, CPath *tail);
 void freePath(CPath *path);
 
 /* find a path from the current location to the given location */
-CPath *findPath(CState *cs, int tx, int ty, unsigned char act);
+CPath *findPath(CState *cs, int tx, int ty, unsigned char act, unsigned char wire);
 
 /* follow this path (and free it). Returns 1 if it was successful, 0 otherwise */
 int followPath(CState *cs, CPath *path);
 
 /* JUST GET THERE! */
-int findAndGoto(CState *cs, int tx, int ty, unsigned char act);
+int findAndGoto(CState *cs, int tx, int ty, unsigned char act, unsigned char wire);
 
 #endif
