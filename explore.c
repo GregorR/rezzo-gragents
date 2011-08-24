@@ -53,7 +53,6 @@ void verticalLoop()
     findAndGoto(cs, cs->x, cs->h * 2 / 3);
     findAndGoto(cs, cs->x, cs->h / 3);
     findAndGoto(cs, cs->x, 0);
-    fprintf(stderr, "%d %d\n", cs->x, cs->y);
 }
 
 void horizontalShimmy()

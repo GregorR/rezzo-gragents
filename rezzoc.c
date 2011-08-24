@@ -668,11 +668,13 @@ fail:
     return succ;
 }
 
+/*
 static void printPath(CPath *path)
 {
     fprintf(stderr, "%c", path->act);
     if (path->next) printPath(path->next);
 }
+*/
 
 /* JUST GET THERE! */
 int findAndGoto(CState *cs, int tx, int ty)
@@ -680,8 +682,8 @@ int findAndGoto(CState *cs, int tx, int ty)
     while (cs->x != tx || cs->y != ty) {
         CPath *path = findPath(cs, tx, ty);
         if (path == NULL) return 0;
-        printPath(path);
-        fprintf(stderr, "\n");
+        /*printPath(path);
+        fprintf(stderr, "\n");*/
         followPath(cs, path);
     }
     return 1;
