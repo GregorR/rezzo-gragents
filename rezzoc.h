@@ -107,15 +107,13 @@ void freePathList(CPath *head, CPath *tail);
 /* free a single path element */
 void freePath(CPath *path);
 
-/* find a path from the current location to the given location, only using the
- * given directions. If a direction is OK, then 1<<(direction) should be set in
- * okCards. */
-CPath *findPath(CState *cs, int tx, int ty, int okCards);
+/* find a path from the current location to the given location */
+CPath *findPath(CState *cs, int tx, int ty);
 
 /* follow this path (and free it). Returns 1 if it was successful, 0 otherwise */
 int followPath(CState *cs, CPath *path);
 
 /* JUST GET THERE! */
-int findAndGoto(CState *cs, int tx, int ty, int okCards);
+int findAndGoto(CState *cs, int tx, int ty);
 
 #endif

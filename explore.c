@@ -24,10 +24,7 @@ CState *cs;
 
 void exploreWorld();
 void verticalLoop();
-void verticalStep();
-void horizontalShimmy(int til);
-void horizontalStep();
-void assertDirection(int dir);
+void horizontalShimmy();
 
 int main()
 {
@@ -37,80 +34,31 @@ int main()
 
     /* now just wander a lot! */
     exploreWorld();
+
+    /* and then spin like a loony */
+    while (1)
+        cstateDoAndWait(cs, ACT_TURN_RIGHT);
 }
 
 void exploreWorld()
 {
-    int sx = cs->x;
-
     do {
         verticalLoop();
-        horizontalShimmy(sx);
-        cstateDoAndWait(cs, ACT_TURN_LEFT);
-    } while (cs->x != sx);
+        horizontalShimmy();
+    } while (cs->x != 0);
 }
 
 void verticalLoop()
 {
-    findAndGoto(cs, cs->x, cs->h * 2 / 3, -1);
-    findAndGoto(cs, cs->x, cs->h / 3, -1);
-    findAndGoto(cs, cs->x, 0, -1);
+    findAndGoto(cs, cs->x, cs->h * 2 / 3);
+    findAndGoto(cs, cs->x, cs->h / 3);
+    findAndGoto(cs, cs->x, 0);
     fprintf(stderr, "%d %d\n", cs->x, cs->y);
 }
 
-void verticalStep()
+void horizontalShimmy()
 {
-    int i, ty;
-    CardinalityHelper ch = cardinalityHelpers[cs->card];
-    assertDirection(NORTH);
-
-    /* figure out our target cell */
-    ty = cs->y-1;
-    if (ty < 0) ty = cs->h-1;
-    cstateGetCell(&i, NULL, cs, cs->x, ty);
-
-    while (cs->y != ty) {
-        /* figure out if it's obstructed */
-        while (cs->c[i] != CELL_NONE)
-            cstateDoAndWait(cs, ACT_HIT);
-
-        /* then move in */
-        cstateDoAndWait(cs, ACT_ADVANCE);
-    }
-}
-
-void horizontalShimmy(int til)
-{
-    int i;
-    for (i = 0; i < VIEWPORT; i++) {
-        horizontalStep();
-        if (cs->x == til) break;
-    }
-}
-
-void horizontalStep()
-{
-    int i, tx;
-    CardinalityHelper ch = cardinalityHelpers[cs->card];
-    assertDirection(EAST);
-
-    /* figure out our target cell */
-    tx = cs->x + 1;
-    if (tx >= cs->w) tx = 0;
-
-    while (cs->x != tx) {
-        /* figure out if it's obstructed */
-        cstateGetCell(&i, NULL, cs, tx, cs->y);
-        while (cs->c[i] != CELL_NONE)
-            cstateDoAndWait(cs, ACT_HIT);
-
-        /* then move in */
-        cstateDoAndWait(cs, ACT_ADVANCE);
-    }
-}
-
-void assertDirection(int dir)
-{
-    while (cs->card != dir)
-        cstateDoAndWait(cs, ACT_TURN_RIGHT);
+    int x = cs->x + VIEWPORT;
+    if (x >= cs->w) x = 0;
+    findAndGoto(cs, x, 0);
 }

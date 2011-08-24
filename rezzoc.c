@@ -151,7 +151,6 @@ void cstateUpdate(CState *cs)
 
     } else {
         fprintf(stderr, "Error %d for action %c\n", (int) cs->sm.ack, cs->cm.act);
-        abort();
 
     }
 
@@ -414,7 +413,7 @@ static int estCost(CState *cs, int fx, int fy, int tx, int ty)
     if (xdist < 0) xdist = -xdist;
     if (ydist < 0) ydist = -ydist;
 
-    return (xdist + ydist) * 3;
+    return xdist + ydist;
 }
 
 static void insertByFScore(CPath **headp, CPath **tailp, CPath *insert)
@@ -490,7 +489,7 @@ static void removeFromList(CPath **headp, CPath **tailp, CPath *torem)
 }
 
 /* find a path from the current location to the given location */
-CPath *findPath(CState *cs, int tx, int ty, int okCards)
+CPath *findPath(CState *cs, int tx, int ty)
 {
     CPath *cur, *next, *good;
     CPath *toSearchHead, *toSearchTail;
@@ -528,7 +527,6 @@ CPath *findPath(CState *cs, int tx, int ty, int okCards)
         /* search surrounding areas */
         for (scard = 0; scard < CARDINALITIES; scard++) {
             CardinalityHelper ch = cardinalityHelpers[scard];
-            if (!(okCards & (1<<scard))) continue;
 
             /* take a step */
             sx = cur->x - ch.xd;
@@ -569,6 +567,7 @@ CPath *findPath(CState *cs, int tx, int ty, int okCards)
 
     /* if we have a good list, organize it properly */
     if (good && good->prev) {
+        good->prev->next = good;
         for (cur = good->prev;; cur = cur->prev) {
             /* remove it from the searched list so it doesn't get freed */
             removeFromList(&searchedHead, &searchedTail, cur);
@@ -580,6 +579,7 @@ CPath *findPath(CState *cs, int tx, int ty, int okCards)
         }
 
         good = cur->next;
+        good->prev = NULL;
 
         /* first step will always be a no-op */
         freePath(cur);
@@ -619,16 +619,20 @@ int followPath(CState *cs, CPath *path)
         if (path->act == ACT_HIT) {
             while (cs->c[i] != CELL_NONE) {
                 if (!cstateDoAndWait(cs, ACT_HIT)) {
-                    succ = 0;
-                    goto fail;
+                    if (cs->sm.ack != ACK_NO_MESSAGE) {
+                        succ = 0;
+                        goto fail;
+                    }
                 }
             }
         }
 
         /* then go */
-        if (!cstateDoAndWait(cs, ACT_ADVANCE)) {
-            succ = 0;
-            goto fail;
+        while (!cstateDoAndWait(cs, ACT_ADVANCE)) {
+            if (cs->sm.ack != ACK_NO_MESSAGE) {
+                succ = 0;
+                goto fail;
+            }
         }
 
         /* make sure all went well */
@@ -663,11 +667,10 @@ static void printPath(CPath *path)
 }
 
 /* JUST GET THERE! */
-int findAndGoto(CState *cs, int tx, int ty, int okCards)
+int findAndGoto(CState *cs, int tx, int ty)
 {
-    fprintf(stderr, "%X\n", okCards);
     while (cs->x != tx || cs->y != ty) {
-        CPath *path = findPath(cs, tx, ty, okCards);
+        CPath *path = findPath(cs, tx, ty);
         if (path == NULL) return 0;
         printPath(path);
         fprintf(stderr, "\n");
