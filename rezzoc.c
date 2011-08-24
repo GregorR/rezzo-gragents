@@ -105,7 +105,7 @@ void cstateUpdate(CState *cs)
 {
     /* FIXME: support for unknown size */
 
-    unsigned char c;
+    unsigned char c, a;
     int wi, si, y, wy, yoff, x, wx;
     CardinalityHelper ch = cardinalityHelpers[cs->card];
 
@@ -169,9 +169,16 @@ void cstateUpdate(CState *cs)
 
             /* separate agent info */
             if (c >= CELL_AGENT && c <= CELL_AGENT_LAST) {
+                a = c-CELL_AGENT;
+                if (cs->agents[a].x >= 0) {
+                    /* they're not there any more! */
+                    cs->c[
+                        cs->agents[a].y*cs->w +
+                        cs->agents[a].x
+                    ] = CELL_NONE;
+                }
                 cs->agents[c-CELL_AGENT].x = wx;
                 cs->agents[c-CELL_AGENT].y = wy;
-                c = CELL_NONE;
             }
 
             /* then mark it */
@@ -541,7 +548,8 @@ CPath *findPath(CState *cs, int tx, int ty)
             act = ACT_ADVANCE;
 
             /* ignore impenatrable things */
-            if ((c >= CELL_FLAG && c <= CELL_FLAG_LAST) ||
+            if ((c >= CELL_AGENT && c <= CELL_AGENT_LAST) ||
+                (c >= CELL_FLAG && c <= CELL_FLAG_LAST) ||
                 (c >= CELL_FLAG_GEYSER && c <= CELL_FLAG_GEYSER_LAST) ||
                 (c >= CELL_BASE && c <= CELL_BASE_LAST)) continue;
 
