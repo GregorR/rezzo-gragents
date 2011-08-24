@@ -20,7 +20,7 @@
 
 #include "rezzoc.h"
 
-#include "../helpers.h"
+#include "../buffer.h"
 
 const CardinalityHelper cardinalityHelpers[] = {
     {1, 0, 0, 1},

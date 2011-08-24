@@ -19,7 +19,6 @@
 
 /* this must be checked out as a subdir of rezzo */
 #include "../agent.h"
-#include "../buffer.h"
 
 /* extra cell values */
 #define CELL_UNKNOWN '\xFF'
