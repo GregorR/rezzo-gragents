@@ -50,14 +50,14 @@ void exploreWorld()
 
 void verticalLoop()
 {
-    findAndGoto(cs, cs->x, cs->h * 2 / 3);
-    findAndGoto(cs, cs->x, cs->h / 3);
-    findAndGoto(cs, cs->x, 0);
+    findAndGoto(cs, cs->x, cs->h * 2 / 3, ACT_BUILD);
+    findAndGoto(cs, cs->x, cs->h / 3, ACT_BUILD);
+    findAndGoto(cs, cs->x, 0, ACT_BUILD);
 }
 
 void horizontalShimmy()
 {
     int x = cs->x + VIEWPORT;
     if (x >= cs->w) x = 0;
-    findAndGoto(cs, x, 0);
+    findAndGoto(cs, x, 0, ACT_BUILD);
 }

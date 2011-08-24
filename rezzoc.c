@@ -66,31 +66,26 @@ CState *newCState()
     SF(ret, malloc, NULL, (sizeof(CState)));
 
     ret->w = ret->h = -1;
-    ret->minx = ret->miny = ret->maxx = ret->maxy = ret->x = ret->y = 0;
+    ret->x = ret->y = 0;
 
     ret->id = -1; /* unknown */
     for (i = 0; i < MAX_AGENTS; i++) {
         ret->agents[i].x = ret->agents[i].y = -1; /* unknown */
     }
 
-    /* one of these three must be filled in some time! */
-    ret->home = ret->cur = NULL;
+    /* this must be filled in some time! */
     ret->c = NULL;
+
+    return ret;
 }
 
 /* intialize a CState with its first server message */
 void cstateFirstSM(CState *cs, int w, int h)
 {
-    if (w > 0 && h > 0) {
-        /* oh good, a known size! */
-        SF(cs->c, malloc, NULL, (w*h));
-        memset(cs->c, CELL_UNKNOWN, w*h);
-        cs->w = w;
-        cs->h = h;
-    } else {
-        /* size isn't known, start with the current CCell */
-        cs->home = cs->cur = newCCell(NULL, 0);
-    }
+    SF(cs->c, malloc, NULL, (w*h));
+    memset(cs->c, CELL_UNKNOWN, w*h);
+    cs->w = w;
+    cs->h = h;
 
     /* set our CM to nop (just in case) */
     cs->cm.ts = cs->sm.ts - 1;
@@ -134,7 +129,7 @@ void cstateUpdate(CState *cs)
 
             case ACT_BUILD:
                 /* mark the current cell as conductor (FIXME: doesn't work with ccells) */
-                cstateGetCell(&wi, NULL, cs, cs->x, cs->y);
+                wi = cstateGetCell(cs, cs->x, cs->y);
                 cs->c[wi] = CELL_CONDUCTOR;
                 cs->x -= ch.xd;
                 cs->y -= ch.yd;
@@ -165,7 +160,7 @@ void cstateUpdate(CState *cs)
 
             /* get the cell */
             c = cs->sm.c[si];
-            cstateGetCell(&wi, NULL, cs, wx, wy);
+            wi = cstateGetCell(cs, wx, wy);
 
             /* separate agent info */
             if (c >= CELL_AGENT && c <= CELL_AGENT_LAST) {
@@ -191,7 +186,6 @@ void cstateUpdate(CState *cs)
 int cstateDoAndWait(CState *cs, unsigned char act)
 {
     int tmpi;
-    unsigned char lastTs = cs->sm.ts;
     cs->cm.ts = cs->sm.ts;
     cs->cm.act = act;
     SF(tmpi, writeAll, -1, (1, (char *) &cs->cm, sizeof(ClientMessage)));
@@ -200,138 +194,14 @@ int cstateDoAndWait(CState *cs, unsigned char act)
     return (cs->sm.ack == ACK_OK);
 }
 
-/* create a new CCell off of this CCell in the given direction */
-CCell *newCCell(CCell *cur, int card)
-{
-    CCell *ret;
-
-    SF(ret, malloc, NULL, (sizeof(CCell)));
-    memset(ret, 0, sizeof(CCell));
-
-    if (cur) {
-        switch (card) {
-            case NORTH:
-                cur->n = ret;
-                ret->s = cur;
-                break;
-
-            case EAST:
-                cur->e = ret;
-                ret->w = cur;
-                break;
-
-            case SOUTH:
-                cur->s = ret;
-                ret->n = cur;
-                break;
-
-            case WEST:
-                cur->w = ret;
-                ret->e = cur;
-                break;
-        }
-    }
-
-    return cur;
-}
-
-/* get a CCell off of this CCell in the given direction (will create a new one if it doesn't exist) */
-CCell *getCCell(CCell *cur, int card)
-{
-    CCell *ret;
-    switch (card) {
-        case NORTH:
-            ret = cur->n;
-            break;
-
-        case EAST:
-            ret = cur->e;
-            break;
-
-        case SOUTH:
-            ret = cur->s;
-            break;
-
-        case WEST:
-            ret = cur->w;
-            break;
-    }
-
-    if (!ret) ret = newCCell(cur, card);
-
-    return ret;
-}
-
-/* assert that the ccell map includes this location */
-void assertCell(CState *cs, int x, int y)
-{
-    int xi, yi, dx, dy;
-    CCell *cur, *tan, *v;
-
-    if (x >= cs->minx && x <= cs->maxx &&
-        y >= cs->miny && y <= cs->maxy) return;
-
-    if (x >= 0) dx = 1; else dx = -1;
-    if (y >= 0) dy = 1; else dy = -1;
-
-    /* go row by row, column by column */
-    v = cs->home;
-    for (yi = dx; yi != y+dy; yi += dy) {
-        tan = v;
-        v = getCCell(v, (dy > 0) ? SOUTH : NORTH);
-        cur = v;
-        for (xi = 0; xi != x+dx; xi += dx) {
-            cur = getCCell(cur, (dx > 0) ? EAST : WEST);
-            v = getCCell(v, (dx > 0) ? EAST : WEST);
-            if (dy > 0) {
-                v->s = cur;
-                cur->n = v;
-            } else {
-                v->n = cur;
-                cur->s = v;
-            }
-        }
-    }
-
-    /* then mark it */
-    if (x < cs->minx) cs->minx = x;
-    if (x > cs->maxx) cs->maxx = x;
-    if (y < cs->miny) cs->miny = y;
-    if (y > cs->maxy) cs->maxy = y;
-}
-
 /* get a cell id at a specified location, which may be out of bounds */
-void cstateGetCell(int *i, CCell **cc, CState *cs, int x, int y)
+int cstateGetCell(CState *cs, int x, int y)
 {
-    if (cs->c) {
-        if (cc) *cc = NULL;
-
-        /* preferred case, size is known */
-        while (x < 0) x += cs->w;
-        while (x >= cs->w) x -= cs->w;
-        while (y < 0) y += cs->h;
-        while (y >= cs->h) y -= cs->h;
-        *i = y*cs->w+x;
-
-    } else {
-        CCell *cur;
-        int xi, yi;
-
-        if (i) *i = -1;
-
-        assertCell(cs, x, y);
-
-        /* start from cur and work our way there */
-        cur = cs->cur;
-        xi = cs->x;
-        yi = cs->y;
-        for (; xi < x; xi++) cur = getCCell(cur, EAST);
-        for (; xi > x; xi--) cur = getCCell(cur, WEST);
-        for (; yi < y; yi++) cur = getCCell(cur, SOUTH);
-        for (; yi > y; yi--) cur = getCCell(cur, NORTH);
-
-        *cc = cur;
-    }
+    while (x < 0) x += cs->w;
+    while (x >= cs->w) x -= cs->w;
+    while (y < 0) y += cs->h;
+    while (y >= cs->h) y -= cs->h;
+    return y*cs->w+x;
 }
 
 /* match our cardinality to the given one */
@@ -496,7 +366,7 @@ static void removeFromList(CPath **headp, CPath **tailp, CPath *torem)
 }
 
 /* find a path from the current location to the given location */
-CPath *findPath(CState *cs, int tx, int ty)
+CPath *findPath(CState *cs, int tx, int ty, unsigned char dact)
 {
     CPath *cur, *next, *good;
     CPath *toSearchHead, *toSearchTail;
@@ -545,7 +415,7 @@ CPath *findPath(CState *cs, int tx, int ty)
             si = sy*cs->w + sx;
             if (searched[si]) continue;
             c = cs->c[si];
-            act = ACT_ADVANCE;
+            act = dact;
 
             /* ignore impenatrable things */
             if ((c >= CELL_AGENT && c <= CELL_AGENT_LAST) ||
@@ -605,6 +475,7 @@ CPath *findPath(CState *cs, int tx, int ty)
 int followPath(CState *cs, CPath *path)
 {
     int succ = 1;
+    unsigned char dact = ACT_ADVANCE;
     CPath *last;
     while (path) {
         int i = path->y*cs->w + path->x;
@@ -614,13 +485,15 @@ int followPath(CState *cs, CPath *path)
             matchCardinality(cs, path->card);
 
         /* check if our expectations are met */
-        if (path->act == ACT_ADVANCE) {
+        if (path->act == ACT_ADVANCE || path->act == ACT_BUILD) {
             /* shouldn't have an obstacle */
             if (cs->c[i] != CELL_NONE) {
                 /* oh dear! */
                 succ = 0;
                 goto fail;
             }
+
+            dact = path->act;
         }
 
         /* hit if we need to */
@@ -636,7 +509,7 @@ int followPath(CState *cs, CPath *path)
         }
 
         /* then go */
-        while (!cstateDoAndWait(cs, ACT_ADVANCE)) {
+        while (!cstateDoAndWait(cs, dact)) {
             if (cs->sm.ack != ACK_NO_MESSAGE) {
                 succ = 0;
                 goto fail;
@@ -677,10 +550,10 @@ static void printPath(CPath *path)
 */
 
 /* JUST GET THERE! */
-int findAndGoto(CState *cs, int tx, int ty)
+int findAndGoto(CState *cs, int tx, int ty, unsigned char act)
 {
     while (cs->x != tx || cs->y != ty) {
-        CPath *path = findPath(cs, tx, ty);
+        CPath *path = findPath(cs, tx, ty, act);
         if (path == NULL) return 0;
         /*printPath(path);
         fprintf(stderr, "\n");*/
