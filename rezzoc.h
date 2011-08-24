@@ -57,6 +57,16 @@ struct _CState {
     ServerMessage sm; /* the last server message received */
 };
 
+/* path (step) for pathfinding */
+typedef struct _CPath CPath;
+struct _CPath {
+    CPath *prev, *next; /* previous, next step if following this path */
+    CPath *lprev, *lnext; /* previous, next where this is stored on a list */
+    int gScore, fScore; /* cost to get here, estimate cost of getting here + getting to goal */
+    unsigned char act; /* expected action (hit or just advance?) */
+    int x, y, card; /* expected state after this step */
+};
+
 /* really truly read this much data */
 ssize_t readAll(int fd, char *buf, size_t count);
 
@@ -84,5 +94,28 @@ CCell *getCCell(CCell *cur, int card);
 
 /* get a cell id at a specified location, which may be out of bounds */
 void cstateGetCell(int *i, CCell **cc, CState *cs, int x, int y);
+
+/* match our cardinality to the given one */
+void matchCardinality(CState *cs, int card);
+
+/* create a path element */
+CPath *newPath(int x, int y, int card);
+
+/* free a path element list */
+void freePathList(CPath *head, CPath *tail);
+
+/* free a single path element */
+void freePath(CPath *path);
+
+/* find a path from the current location to the given location, only using the
+ * given directions. If a direction is OK, then 1<<(direction) should be set in
+ * okCards. */
+CPath *findPath(CState *cs, int tx, int ty, int okCards);
+
+/* follow this path (and free it). Returns 1 if it was successful, 0 otherwise */
+int followPath(CState *cs, CPath *path);
+
+/* JUST GET THERE! */
+int findAndGoto(CState *cs, int tx, int ty, int okCards);
 
 #endif

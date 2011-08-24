@@ -52,11 +52,10 @@ void exploreWorld()
 
 void verticalLoop()
 {
-    int sy = cs->y;
-
-    do {
-        verticalStep();
-    } while (cs->y != sy);
+    findAndGoto(cs, cs->x, cs->h * 2 / 3, -1);
+    findAndGoto(cs, cs->x, cs->h / 3, -1);
+    findAndGoto(cs, cs->x, 0, -1);
+    fprintf(stderr, "%d %d\n", cs->x, cs->y);
 }
 
 void verticalStep()

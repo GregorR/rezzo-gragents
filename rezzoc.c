@@ -151,6 +151,7 @@ void cstateUpdate(CState *cs)
 
     } else {
         fprintf(stderr, "Error %d for action %c\n", (int) cs->sm.ack, cs->cm.act);
+        abort();
 
     }
 
@@ -325,4 +326,352 @@ void cstateGetCell(int *i, CCell **cc, CState *cs, int x, int y)
 
         *cc = cur;
     }
+}
+
+/* match our cardinality to the given one */
+void matchCardinality(CState *cs, int card)
+{
+    int cdiff = card - cs->card;
+    unsigned char act = ACT_TURN_RIGHT;
+
+    /* figure out which way to turn */
+    while (cdiff < 0) cdiff += CARDINALITIES;
+    if (cdiff > 2) act = ACT_TURN_LEFT;
+
+    /* then do it */
+    while (cs->card != card)
+        cstateDoAndWait(cs, act);
+}
+
+static CPath *pathHead = NULL, *pathTail = NULL;
+
+/* create a path element */
+CPath *newPath(int x, int y, int card)
+{
+    CPath *ret;
+    if (pathHead) {
+        ret = pathHead;
+        pathHead = ret->lnext;
+
+    } else {
+        SF(ret, malloc, NULL, (sizeof(CPath)));
+
+    }
+
+    memset(ret, 0, sizeof(CPath));
+    ret->x = x;
+    ret->y = y;
+    ret->card = card;
+
+    return ret;
+}
+
+/* free a path element list */
+void freePathList(CPath *head, CPath *tail)
+{
+    if (pathTail) {
+        head->lprev = pathTail;
+        pathTail->lnext = head;
+
+    } else {
+        pathHead = head;
+
+    }
+
+    pathTail = tail;
+}
+
+/* free a single path element */
+void freePath(CPath *path)
+{
+    if (pathTail) {
+        path->lprev = pathTail;
+        pathTail->lnext = path;
+
+    } else {
+        pathHead = path;
+
+    }
+
+    pathTail = path;
+}
+
+/* estimated cost for this motion */
+static int estCost(CState *cs, int fx, int fy, int tx, int ty)
+{
+    int xdist = tx - fx;
+    int ydist = ty - fy;
+    int hw = cs->w/2;
+    int hh = cs->h/2;
+
+    /* compute the shortest wrapping distance */
+    while (xdist < -hw) xdist += cs->w;
+    while (xdist >= hw) xdist -= cs->w;
+    while (ydist < -hh) ydist += cs->h;
+    while (ydist >= hh) ydist -= cs->h;
+
+    /* must be positive */
+    if (xdist < 0) xdist = -xdist;
+    if (ydist < 0) ydist = -ydist;
+
+    return (xdist + ydist) * 3;
+}
+
+static void insertByFScore(CPath **headp, CPath **tailp, CPath *insert)
+{
+    CPath *head = *headp;
+    CPath *tail = *tailp;
+
+    if (!head) {
+        /* simplest case */
+        head = tail = insert;
+
+    } else {
+        CPath *cur = head;
+        for (; cur && cur->fScore <= insert->fScore; cur = cur->lnext);
+        if (!cur) {
+            /* insert goes on the tail */
+            tail->lnext = insert;
+            insert->lprev = tail;
+            tail = insert;
+
+        } else if (!cur->lprev) {
+            /* insert goes on the head */
+            head->lprev = insert;
+            insert->lnext = head;
+            head = insert;
+
+        } else {
+            /* insert goes in the middle */
+            insert->lprev = cur->lprev;
+            insert->lnext = cur;
+            cur->lprev->lnext = insert;
+            cur->lprev = insert;
+
+        }
+
+    }
+
+    *headp = head;
+    *tailp = tail;
+}
+
+static void removeFromList(CPath **headp, CPath **tailp, CPath *torem)
+{
+    CPath *head = *headp;
+    CPath *tail = *tailp;
+
+    if (head == torem) {
+        if (tail == torem) {
+            /* list is gone! */
+            head = tail = NULL;
+
+        } else {
+            head = torem->lnext;
+            torem->lnext = NULL;
+            head->lprev = NULL;
+
+        }
+
+    } else if (tail == torem) {
+        tail = torem->lprev;
+        torem->lprev = NULL;
+        tail->lnext = NULL;
+
+    } else {
+        torem->lprev->lnext = torem->lnext;
+        torem->lnext->lprev = torem->lprev;
+        torem->lprev = torem->lnext = NULL;
+
+    }
+
+    *headp = head;
+    *tailp = tail;
+}
+
+/* find a path from the current location to the given location */
+CPath *findPath(CState *cs, int tx, int ty, int okCards)
+{
+    CPath *cur, *next, *good;
+    CPath *toSearchHead, *toSearchTail;
+    CPath *searchedHead, *searchedTail;
+    unsigned char *searched;
+    int scard, sx, sy, si, scost;
+    unsigned char c, act;
+
+    /* our initial searchlist is just the starting position */
+    cur = toSearchHead = toSearchTail = newPath(cs->x, cs->y, cs->card);
+    cur->gScore = cur->fScore = 0;
+    good = NULL;
+    searchedHead = searchedTail = NULL;
+
+    SF(searched, malloc, NULL, (cs->w * cs->h));
+    memset(searched, 0, cs->w*cs->h);
+
+    /* now search! */
+    while (toSearchHead) {
+        /* remove it */
+        cur = toSearchHead;
+        removeFromList(&toSearchHead, &toSearchTail, cur);
+
+        /* is it good? */
+        if (cur->x == tx && cur->y == ty) {
+            /* done! */
+            good = cur;
+            break;
+        }
+
+        /* add it to the searched list */
+        insertByFScore(&searchedHead, &searchedTail, cur);
+        searched[cur->y*cs->w+cur->x] = 1;
+
+        /* search surrounding areas */
+        for (scard = 0; scard < CARDINALITIES; scard++) {
+            CardinalityHelper ch = cardinalityHelpers[scard];
+            if (!(okCards & (1<<scard))) continue;
+
+            /* take a step */
+            sx = cur->x - ch.xd;
+            sy = cur->y - ch.yd;
+            if (sx < 0) sx += cs->w;
+            if (sx >= cs->w) sx -= cs->w;
+            if (sy < 0) sy += cs->h;
+            if (sy >= cs->h) sy -= cs->h;
+            si = sy*cs->w + sx;
+            if (searched[si]) continue;
+            c = cs->c[si];
+            act = ACT_ADVANCE;
+
+            /* ignore impenatrable things */
+            if ((c >= CELL_FLAG && c <= CELL_FLAG_LAST) ||
+                (c >= CELL_FLAG_GEYSER && c <= CELL_FLAG_GEYSER_LAST) ||
+                (c >= CELL_BASE && c <= CELL_BASE_LAST)) continue;
+
+            /* cost of this action */
+            scost = 1; /* to move */
+            if (scard != cur->card) scost++; /* to turn */
+            if (c != CELL_NONE && c != (unsigned char) CELL_UNKNOWN) {
+                /* to hit */
+                act = ACT_HIT;
+                scost += 4;
+            }
+
+            /* now make the object for it */
+            next = newPath(sx, sy, scard);
+            next->act = act;
+            next->prev = cur;
+            next->gScore = cur->gScore + scost;
+            next->fScore = next->gScore + estCost(cs, sx, sy, tx, ty);
+            insertByFScore(&toSearchHead, &toSearchTail, next);
+
+        }
+    }
+
+    /* if we have a good list, organize it properly */
+    if (good && good->prev) {
+        for (cur = good->prev;; cur = cur->prev) {
+            /* remove it from the searched list so it doesn't get freed */
+            removeFromList(&searchedHead, &searchedTail, cur);
+
+            if (cur->prev) {
+                /* hook it the other way */
+                cur->prev->next = cur;
+            } else break;
+        }
+
+        good = cur->next;
+
+        /* first step will always be a no-op */
+        freePath(cur);
+    }
+
+    /* free up our lists */
+    if (toSearchHead) freePathList(toSearchHead, toSearchTail);
+    if (searchedHead) freePathList(searchedHead, searchedTail);
+    free(searched);
+
+    return good;
+}
+
+/* follow this path (and free it). Returns 1 if it was successful, 0 otherwise */
+int followPath(CState *cs, CPath *path)
+{
+    int succ = 1;
+    CPath *last;
+    while (path) {
+        int i = path->y*cs->w + path->x;
+
+        /* make our cardinality match */
+        if (cs->card != path->card)
+            matchCardinality(cs, path->card);
+
+        /* check if our expectations are met */
+        if (path->act == ACT_ADVANCE) {
+            /* shouldn't have an obstacle */
+            if (cs->c[i] != CELL_NONE) {
+                /* oh dear! */
+                succ = 0;
+                goto fail;
+            }
+        }
+
+        /* hit if we need to */
+        if (path->act == ACT_HIT) {
+            while (cs->c[i] != CELL_NONE) {
+                if (!cstateDoAndWait(cs, ACT_HIT)) {
+                    succ = 0;
+                    goto fail;
+                }
+            }
+        }
+
+        /* then go */
+        if (!cstateDoAndWait(cs, ACT_ADVANCE)) {
+            succ = 0;
+            goto fail;
+        }
+
+        /* make sure all went well */
+        if (cs->x != path->x || cs->y != path->y) {
+            /* oh no! */
+            succ = 0;
+            goto fail;
+        }
+
+        /* success! Move on */
+        last = path;
+        path = path->next;
+        if (path) path->prev = NULL;
+        freePath(last);
+    }
+fail:
+
+    /* free anything left over */
+    while (path) {
+        last = path;
+        path = path->next;
+        freePath(last);
+    }
+
+    return succ;
+}
+
+static void printPath(CPath *path)
+{
+    fprintf(stderr, "%c", path->act);
+    if (path->next) printPath(path->next);
+}
+
+/* JUST GET THERE! */
+int findAndGoto(CState *cs, int tx, int ty, int okCards)
+{
+    fprintf(stderr, "%X\n", okCards);
+    while (cs->x != tx || cs->y != ty) {
+        CPath *path = findPath(cs, tx, ty, okCards);
+        if (path == NULL) return 0;
+        printPath(path);
+        fprintf(stderr, "\n");
+        followPath(cs, path);
+    }
+    return 1;
 }
