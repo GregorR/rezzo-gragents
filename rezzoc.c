@@ -338,6 +338,13 @@ int cstateGetCell(CState *cs, int x, int y)
     return cstateGetCellXY(cs, x, y, NULL, NULL);
 }
 
+/* get the cell value in front of the agent */
+unsigned char cstateGetBlockingCell(CState *cs)
+{
+    CardinalityHelper ch = cardinalityHelpers[cs->card];
+    return cs->c[cstateGetCell(cs, cs->x-ch.xd, cs->y-ch.yd)];
+}
+
 /* find the nearest cell with the given value */
 int cstateFindNearest(CState *cs, int *sx, int *sy, unsigned char type)
 {
@@ -523,8 +530,16 @@ static void removeFromList(CPath **headp, CPath **tailp, CPath *torem)
     *tailp = tail;
 }
 
+/* indestructable types */
+static int indestructable(unsigned char c)
+{
+    return (c >= CELL_AGENT && c <= CELL_AGENT_LAST) ||
+           (c >= CELL_FLAG_GEYSER && c <= CELL_FLAG_GEYSER_LAST) ||
+           (c >= CELL_BASE && c <= CELL_BASE_LAST);
+}
+
 /* find a path from the current location to the given location */
-CPath *findPath(CState *cs, int tx, int ty, unsigned char dact, unsigned char wire)
+CPath *findPath(CState *cs, int tx, int ty, unsigned char dact, unsigned char flags)
 {
     CPath *cur, *next, *good;
     CPath *toSearchHead, *toSearchTail;
@@ -536,6 +551,7 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact, unsigned char wi
     /* our initial searchlist is just the starting position */
     cur = toSearchHead = toSearchTail = newPath(cs->x, cs->y, cs->card);
     cur->gScore = cur->fScore = 0;
+    cur->act = ACT_NOP;
     good = NULL;
     searchedHead = searchedTail = NULL;
 
@@ -557,7 +573,6 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact, unsigned char wi
 
         /* add it to the searched list */
         insertByFScore(&searchedHead, &searchedTail, cur);
-        searched[cur->y*cs->w+cur->x] = 1;
 
         /* search surrounding areas */
         for (scard = 0; scard < CARDINALITIES; scard++) {
@@ -568,16 +583,14 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact, unsigned char wi
             sy = cur->y - ch.yd;
             si = cstateGetCellXY(cs, sx, sy, &sx, &sy);
             if (searched[si]) continue;
+            searched[si] = 1;
             c = cs->c[si];
             act = dact;
             hit = 0;
             hitl = hitr = 0;
 
             /* ignore impenatrable things */
-            if ((c >= CELL_AGENT && c <= CELL_AGENT_LAST) ||
-                (c >= CELL_FLAG && c <= CELL_FLAG_LAST) ||
-                (c >= CELL_FLAG_GEYSER && c <= CELL_FLAG_GEYSER_LAST) ||
-                (c >= CELL_BASE && c <= CELL_BASE_LAST)) continue;
+            if (indestructable(c)) continue;
 
             /* cost of this action */
             scost = 1; /* to move */
@@ -589,22 +602,29 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact, unsigned char wi
             }
 
             /* more complicated for building wires */
-            if (wire) {
+            if (flags & FIND_FLAG_WIRE) {
                 int nx, ny, ni;
 
                 /* left */
                 nx = cur->x - ch.xr;
                 ny = cur->y - ch.yr;
                 ni = cstateGetCell(cs, nx, ny);
-                if (cs->c[ni] != CELL_NONE) hitl = 1;
+                if (cs->c[ni] != CELL_NONE && !indestructable(cs->c[ni])) hitl = 1;
 
                 /* right */
                 nx = cur->x + ch.xr;
                 ny = cur->y + ch.yr;
                 ni = cstateGetCell(cs, nx, ny);
-                if (cs->c[ni] != CELL_NONE) hitr = 1;
+                if (cs->c[ni] != CELL_NONE && !indestructable(cs->c[ni])) hitr = 1;
             }
             scost += hitl * (2+CELL_DESTROY_DAMAGE) + hitr * (2+CELL_DESTROY_DAMAGE);
+
+            /* and more complicated for avoiding the base */
+            if (flags & FIND_FLAG_AVOID_BASE) {
+                if (sx <= 2 || sy <= 2 ||
+                    sx >= cs->w - 2 || sy >= cs->h - 2)
+                    scost += 1024; /* arbitrary large value */
+            }
 
             /* now make the object for it */
             next = newPath(sx, sy, scard);
@@ -622,22 +642,30 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact, unsigned char wi
 
     /* if we have a good list, organize it properly */
     if (good && good->prev) {
-        good->prev->next = good;
-        for (cur = good->prev;; cur = cur->prev) {
-            /* remove it from the searched list so it doesn't get freed */
-            removeFromList(&searchedHead, &searchedTail, cur);
-
-            if (cur->prev) {
-                /* hook it the other way */
-                cur->prev->next = cur;
-            } else break;
+        if ((flags & FIND_FLAG_STOP_SHORT) && good->prev) {
+            cur = good->prev;
+            freePath(good);
+            good = cur;
         }
 
-        good = cur->next;
-        good->prev = NULL;
+        if (good->prev) {
+            good->prev->next = good;
+            for (cur = good->prev;; cur = cur->prev) {
+                /* remove it from the searched list so it doesn't get freed */
+                removeFromList(&searchedHead, &searchedTail, cur);
 
-        /* first step will always be a no-op */
-        freePath(cur);
+                if (cur->prev) {
+                    /* hook it the other way */
+                    cur->prev->next = cur;
+                } else break;
+            }
+
+            good = cur->next;
+            good->prev = NULL;
+
+            /* first step will always be a no-op */
+            freePath(cur);
+        }
     }
 
     /* free up our lists */
@@ -675,7 +703,6 @@ int followPath(CState *cs, CPath *path)
         /* make our cardinality match */
         if (cs->card != path->card) {
             matchCardinality(cs, path->card);
-            nact = ACT_ADVANCE; /* don't build hard corners */
         }
 
         /* check if our expectations are met */
@@ -762,12 +789,12 @@ static void printPath(CPath *path)
 /* JUST GET THERE! */
 int findAndGoto(CState *cs, int tx, int ty, unsigned char act, unsigned char wire)
 {
-    while (cs->x != tx || cs->y != ty) {
+    while (1) {
         CPath *path = findPath(cs, tx, ty, act, wire);
         if (path == NULL) return 0;
         /*printPath(path);
         fprintf(stderr, "\n");*/
-        followPath(cs, path);
+        if (followPath(cs, path)) break;
     }
     return 1;
 }

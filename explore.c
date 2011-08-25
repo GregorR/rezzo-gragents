@@ -28,7 +28,7 @@ void horizontalShimmy();
 
 int main()
 {
-    int ex, ey;
+    int ex, ey, i;
 
     cs = newCState();
     cstateFirstSM(cs, WW, WH);
@@ -37,14 +37,23 @@ int main()
     exploreWorld();
 
     /* get away from our flag geysers */
-    findAndGoto(cs, 0, 2, ACT_ADVANCE, 0);
+    ex = 0;
+    ey = -2;
+    cstateGetCellXY(cs, ex, ey, &ex, &ey);
+    findAndGoto(cs, ex, ey, ACT_ADVANCE, 0);
 
     /* then find an electron */
     cstateFindNearest(cs, &ex, &ey, CELL_ELECTRON);
     if (ex >= 0) {
         /* go there */
-        findAndGoto(cs, ex, ey, ACT_BUILD, 1);
-    };
+        findAndGoto(cs, ex, ey, ACT_BUILD, FIND_FLAG_WIRE | FIND_FLAG_STOP_SHORT | FIND_FLAG_AVOID_BASE);
+
+        /* then make sure something gets built to connect them */
+        for (i = 0; i < CARDINALITIES && cstateGetBlockingCell(cs) != CELL_NONE; i++) {
+            cstateDoAndWait(cs, ACT_TURN_RIGHT);
+        }
+        if (i != CARDINALITIES) cstateDoAndWait(cs, ACT_BUILD);
+    }
 
     /* and then spin like a loony */
     while (1)

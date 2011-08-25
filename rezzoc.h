@@ -27,6 +27,11 @@
 #define CELL_FLAG_GEYSER_LAST 'j'
 #define CELL_BASE_LAST 'u'
 
+/* flags for finding */
+#define FIND_FLAG_WIRE          1
+#define FIND_FLAG_STOP_SHORT    2
+#define FIND_FLAG_AVOID_BASE    4
+
 BUFFER(ClientMessage, ClientMessage);
 BUFFER(ServerMessage, ServerMessage);
 
@@ -88,6 +93,9 @@ int cstateGetCellXY(CState *cs, int x, int y, int *sx, int *sy);
 /* get a cell id at a specified location, which may be out of bounds */
 int cstateGetCell(CState *cs, int x, int y);
 
+/* get the cell value in front of the agent */
+unsigned char cstateGetBlockingCell(CState *cs);
+
 /* find the nearest cell with the given value */
 int cstateFindNearest(CState *cs, int *x, int *y, unsigned char type);
 
@@ -104,12 +112,12 @@ void freePathList(CPath *head, CPath *tail);
 void freePath(CPath *path);
 
 /* find a path from the current location to the given location */
-CPath *findPath(CState *cs, int tx, int ty, unsigned char act, unsigned char wire);
+CPath *findPath(CState *cs, int tx, int ty, unsigned char act, unsigned char flags);
 
 /* follow this path (and free it). Returns 1 if it was successful, 0 otherwise */
 int followPath(CState *cs, CPath *path);
 
 /* JUST GET THERE! */
-int findAndGoto(CState *cs, int tx, int ty, unsigned char act, unsigned char wire);
+int findAndGoto(CState *cs, int tx, int ty, unsigned char act, unsigned char flags);
 
 #endif
