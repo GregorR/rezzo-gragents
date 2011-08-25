@@ -14,6 +14,8 @@
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#define _XOPEN_SOURCE /* for pid_t */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
