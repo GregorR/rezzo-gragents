@@ -72,7 +72,10 @@ CState *newCState()
 
     ret->id = -1; /* unknown */
     for (i = 0; i < MAX_AGENTS; i++) {
-        ret->agents[i].x = ret->agents[i].y = -1; /* unknown */
+        ret->agents[i].x = ret->agents[i].y =
+        ret->agents[i].bx = ret->agents[i].by =
+        ret->agents[i].fgx = ret->agents[i].fgy =
+            -1; /* unknown */
     }
 
     /* this must be filled in some time! */
@@ -300,6 +303,20 @@ void cstateUpdate(CState *cs)
                 }
                 cs->agents[c-CELL_AGENT].x = wx;
                 cs->agents[c-CELL_AGENT].y = wy;
+
+                /* maybe this is us? */
+                if (x == VIEWPORT/2 && y == VIEWPORT-1)
+                    cs->id = a;
+            }
+            if (c >= CELL_BASE && c <= CELL_BASE_LAST) {
+                a = c-CELL_BASE;
+                cs->agents[a].bx = wx;
+                cs->agents[a].by = wy;
+            }
+            if (c >= CELL_FLAG_GEYSER && c <= CELL_FLAG_GEYSER_LAST) {
+                a = c-CELL_FLAG_GEYSER;
+                cs->agents[a].fgx = wx;
+                cs->agents[a].fgy = wy;
             }
 
             /* then mark it */
@@ -353,8 +370,9 @@ int cstateFindNearest(CState *cs, int *sx, int *sy, unsigned char type)
     int r, x, y, rx, ry, i;
 
     for (r = 1; r < cs->w || r < cs->h; r++) {
-        for (y = -r; y < r; y++) {
-            for (x = -r; x < r; x++) {
+        for (y = -r; y <= r; y++) {
+            int step = (y == -r || y == r) ? 1 : (2*r);
+            for (x = -r; x <= r; x += step) {
                 i = cstateGetCellXY(cs, cs->x+x, cs->y+y, &rx, &ry);
                 if (cs->c[i] == type) {
                     /* gotcha! */
@@ -623,8 +641,8 @@ CPath *findPath(CState *cs, int tx, int ty, unsigned char dact, unsigned char fl
 
             /* and more complicated for avoiding the base */
             if (flags & FIND_FLAG_AVOID_BASE) {
-                if (sx <= 2 || sy <= 2 ||
-                    sx >= cs->w - 2 || sy >= cs->h - 2)
+                if ((sx <= 2 || sx >= cs->w - 2) &&
+                    (sy <= 2 || sy >= cs->h - 2))
                     scost += 1024; /* arbitrary large value */
             }
 

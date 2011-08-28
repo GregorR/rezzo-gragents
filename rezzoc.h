@@ -38,7 +38,9 @@ BUFFER(ServerMessage, ServerMessage);
 /* agent info */
 typedef struct _CAgent CAgent;
 struct _CAgent {
-    int x, y;
+    int x, y; /* agent's last known location */
+    int bx, by; /* location of a base */
+    int fgx, fgy; /* location of a flag geyser */
 };
 
 /* player state */
